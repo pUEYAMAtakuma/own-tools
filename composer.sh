@@ -16,8 +16,6 @@ TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-30}
 POLL_INTERVAL=${POLL_INTERVAL:-1}
 # ----------
 
-printf "\n========================================\n Docker Compose 管理メニュー \n========================================\n"
-
 options=(
   "up (起動 -d)"
   "ps (状態確認)"
@@ -28,6 +26,14 @@ options=(
   "down (停止・削除)"
   "exit (終了)"
 )
+
+print_main_menu() {
+  local i
+  printf "\n========================================\n Docker Compose 管理メニュー \n========================================\n"
+  for i in "${!options[@]}"; do
+    printf " %d) %s\n" "$((i + 1))" "${options[$i]}"
+  done
+}
 
 if ! cd "$dockerDir"; then
   echo "error: dockerDir not found: $dockerDir" >&2
@@ -65,10 +71,32 @@ run_backend_jar() {
   return "$rc"
 }
 
-PS3="╰─ >> choose number : "
+# option 3 専用: Ctrl+C でログ追従を止めてもメニューシェルは継続する
+run_logs_follow() {
+  local rc
 
-select opt in "${options[@]}"; do
-  case $REPLY in
+  set +e
+  "$DC" logs -f --tail=100
+  rc=$?
+  set -e
+
+  # Ctrl+C (SIGINT) での終了は正常キャンセルとして扱う
+  if [ "$rc" -eq 130 ]; then
+    printf "\nlogs canceled. back to menu.\n"
+    return 0
+  fi
+  return "$rc"
+}
+
+while true; do
+  print_main_menu
+
+  if ! read -r -p "main> choose number (1-${#options[@]}): " choice; then
+    echo
+    break
+  fi
+
+  case "$choice" in
   1)
     "$DC" up -d
     ;;
@@ -76,7 +104,9 @@ select opt in "${options[@]}"; do
     "$DC" ps
     ;;
   3)
-    "$DC" logs -f --tail=100
+    if ! run_logs_follow; then
+      echo "error: failed to show logs." >&2
+    fi
     ;;
   4)
     # build & run
@@ -86,7 +116,11 @@ select opt in "${options[@]}"; do
       continue
     fi
 
-    read -r -p "╰─ >> which run environment? (batch or api): " ENV
+    if ! read -r -p "build> which run environment? (batch or api): " ENV; then
+      echo
+      popd >/dev/null 2>&1 || true
+      continue
+    fi
     ENV="${ENV:-}"
     if [ -z "$ENV" ]; then
       echo "break. choose environment" >&2
@@ -150,19 +184,31 @@ select opt in "${options[@]}"; do
     ;;
   5)
     # コンテナに入る（ログイン直後のカレントを /backend に設定）
+    container=""
     if command -v fzf >/dev/null 2>&1; then
       container=$(docker ps --format "{{.Names}}" | fzf --height 40% --reverse)
     else
+      local_idx=""
       mapfile -t containers < <(docker ps --format "{{.Names}}")
       if [ "${#containers[@]}" -eq 0 ]; then
         echo "稼働中のコンテナがありません。" >&2
         continue
       fi
       echo "コンテナを選んでください:"
-      select c in "${containers[@]}"; do
-        container="$c"
-        break
+      for i in "${!containers[@]}"; do
+        printf " %d) %s\n" "$((i + 1))" "${containers[$i]}"
       done
+      if ! read -r -p "container> choose number (1-${#containers[@]}): " local_idx; then
+        echo
+        continue
+      fi
+
+      if [[ "$local_idx" =~ ^[0-9]+$ ]] && [ "$local_idx" -ge 1 ] && [ "$local_idx" -le "${#containers[@]}" ]; then
+        container="${containers[$((local_idx - 1))]}"
+      else
+        echo "無効な選択です"
+        continue
+      fi
     fi
 
     if [ -n "${container:-}" ]; then
