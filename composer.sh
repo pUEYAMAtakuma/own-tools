@@ -8,6 +8,8 @@ dockerDir="${basePath}/docker"
 buildPath="${basePath}/backend"
 # コンテナ内で相対指定する JAR パス（コンテナ内の作業ディレクトリは /backend を想定）
 CONTAINER_JAR_PATH="./build/libs/bo-backend-0.0.1-SNAPSHOT.jar"
+# option 4 実行時のアプリログ（コンテナログイン時のデフォルト作業ディレクトリ配下）
+CONTAINER_RUN_LOG_PATH="./bo-backend-run.log"
 # ホスト側のビルド成果物（確認用）
 HOST_JAR_PATH="${buildPath}/build/libs/bo-backend-0.0.1-SNAPSHOT.jar"
 
@@ -58,7 +60,8 @@ run_backend_jar() {
   trap 'printf "\napp run canceled. back to menu.\n"' INT
 
   set +e
-  "$DC" exec bo-backend bash -lc "java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -jar ${CONTAINER_JAR_PATH}"
+  echo "log file (container): ${CONTAINER_RUN_LOG_PATH}"
+  "$DC" exec bo-backend bash -lc "java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -jar ${CONTAINER_JAR_PATH} 2>&1 | tee -a ${CONTAINER_RUN_LOG_PATH}; exit \${PIPESTATUS[0]}"
   rc=$?
   set -e
 
