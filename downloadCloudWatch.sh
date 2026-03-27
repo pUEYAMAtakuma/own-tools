@@ -1,11 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
+# ---- 引数チェック ----
+# 使い方: ./downloadCloudWatch.sh <log-stream-name>
+# 例:     ./downloadCloudWatch.sh bo-dev-batch-jobdef-cmn/default/09d3f80e99cb4e0d9e789f3ffe501f42
+if [ $# -lt 1 ]; then
+  echo "Usage: $0 <log-stream-name>" >&2
+  echo "  例: $0 bo-dev-batch-jobdef-cmn/default/09d3f80e99cb4e0d9e789f3ffe501f42" >&2
+  exit 1
+fi
+
 # ---- 設定 ----
 REGION="ap-northeast-1"
 LOG_GROUP="/aws/batch/job"
-# stream-name / default / hash
-LOG_STREAM=""
+# 第1引数: stream-name / default / hash
+LOG_STREAM="$1"
 
 # 取得期間を限定したい場合は下面を編集（空にするとストリーム全域を取得する）
 # 例: FROM_HUMAN='2026-03-01 00:00:00 +09:00'
@@ -14,7 +23,6 @@ TO_HUMAN=''
 
 # 出力ファイル
 OUT_NDJSON="cw_${LOG_STREAM##*/}_events.ndjson"
-OUT_CSV="cw_${LOG_STREAM##*/}_events.csv"
 
 # ---- 日付を ms に変換（指定があれば） ----
 if [ -n "$FROM_HUMAN" ]; then
@@ -66,22 +74,7 @@ while :; do
   prev_token="$token"
 done
 
-# ---- NDJSON -> CSV (timestamp(ms), timestamp(JST), message) ----
-# CSV ヘッダ
-printf '%s\n' '"timestamp_ms","timestamp_jst","message"' >"$OUT_CSV"
-
-# 各行を加工して出力（メッセージ中の " を "" にエスケープ）
-while IFS= read -r line; do
-  ts=$(echo "$line" | jq -r '.timestamp')
-  msg=$(echo "$line" | jq -r '.message' | sed 's/"/""/g')
-  # JST 表示（date が GNU date の環境を想定）
-  timestamp_jst=$(TZ=Asia/Tokyo date -d "@$((ts / 1000))" '+%Y-%m-%d %H:%M:%S%z')
-  # CSV に追記
-  printf '%s,"%s","%s"\n' "$ts" "$timestamp_jst" "$msg" >>"$OUT_CSV"
-done <"$OUT_NDJSON"
-
-echo "完了: $OUT_NDJSON と $OUT_CSV を作成しました。"
+echo "完了: $OUT_NDJSON を作成しました。"
 
 # 大きいファイルは S3 にコピーする例（必要なら有効化）
 # aws s3 cp "$OUT_NDJSON" s3://your-bucket/path/
-# aws s3 cp "$OUT_CSV" s3://your-bucket/path/
